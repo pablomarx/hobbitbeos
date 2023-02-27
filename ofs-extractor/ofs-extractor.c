@@ -92,7 +92,7 @@ int main (int argc, char **argv) {
 	}
 
 	printf("volume name: %s\n", toc.VolumeName);
-	printf("ofs version: %li.%li\n", htonl(toc.VersionNumber)>>16&0xffff,
+	printf("ofs version: %u.%u\n", htonl(toc.VersionNumber)>>16&0xffff,
 												htonl(toc.VersionNumber)&0xfff);
 	if (((htonl(toc.VersionNumber)>>16&0xffff) != 1 ||
 			(htonl(toc.VersionNumber)&0xfff) != 0) && wuss) {
@@ -120,7 +120,7 @@ done:
 }
 
 void readDir(int sector) {
-	long tmpoff;
+	uint32_t tmpoff;
 	int outfd,i,j;
 	DirectoryBlock block;
 	static struct timeval tv[2];
@@ -162,7 +162,7 @@ void readDir(int sector) {
 						debug_printf("\tNO FAT\t%i", htonl(e.FirstAllocList)&0x7fffffff);
 					}
 					debug_printf("\t%i", htonl(e.LastAllocList));
-					printf("\t%li", htonl(e.LogicalSize));
+					printf("\t%u", htonl(e.LogicalSize));
 					debug_printf("\t%i", htonl(e.PhysicalSize));
 				}
 
@@ -265,7 +265,7 @@ void extractFATFile(int outfd, FileEntry e) {
 }
 
 void extractNormalFile(int outfd, FileEntry e) {
-	long length,current;
+	uint32_t length,current;
 	char buffer[512];
 
 	lseek(fd, (htonl(e.FirstAllocList)&0x7fffffff)*512, SEEK_SET);

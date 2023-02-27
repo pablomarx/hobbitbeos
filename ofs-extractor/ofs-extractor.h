@@ -34,37 +34,39 @@
  *
  */
 
+#include <stdint.h>
+
 typedef struct	TableOfContents {
-	long	VersionNumber;
-	long  unknown1[3];
-	long	FirstDirSector;
-	long  unknown2[6];
-	char	VolumeName[32];
-	long	unknown3[109];
+	uint32_t VersionNumber;
+	uint32_t unknown1[3];
+	uint32_t FirstDirSector;
+	uint32_t unknown2[6];
+	char     VolumeName[32];
+	uint32_t unknown3[109];
 } TableOfContents;
 
 typedef struct	FileEntry {
-	char	FileName[32];
-	long	FirstAllocList;
-	long	LastAllocList;
-	long	FileType;
-	long	CreationDate;
-	long	ModificationDate;
-	long	LogicalSize;
-	long	PhysicalSize;
-	long	Creator;
+	char     FileName[32];
+	uint32_t FirstAllocList;
+	uint32_t LastAllocList;
+	uint32_t FileType;
+	uint32_t CreationDate;
+	uint32_t ModificationDate;
+	uint32_t LogicalSize;
+	uint32_t PhysicalSize;
+	uint32_t Creator;
 } FileEntry;
 
 typedef struct	DirectoryBlock {
-	long				NextDirectoryBlock;
-	long				unknown1[15];
-	FileEntry	  	Entries[63];
-	long				unknown2[16];
+	uint32_t  NextDirectoryBlock;
+	uint32_t  unknown1[15];
+	FileEntry Entries[63];
+	uint32_t  unknown2[16];
 } DirectoryBlock;
 
 struct fat {
-	long	offset;
-	long	count;
+	uint32_t offset;
+	uint32_t count;
 } fat;
 
 void usage(char *progname);
