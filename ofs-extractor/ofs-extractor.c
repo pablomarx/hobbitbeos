@@ -40,9 +40,12 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
 #include <sys/time.h>
 
 #include "ofs-extractor.h"
+
+#define countof(__x__) (sizeof(__x__) / sizeof(*__x__))
 
 int fd,showFileType=0,recurse=0,writeToDisk=0,debug=0,wuss=1;
 char error[255];
@@ -50,6 +53,7 @@ char error[255];
 int main (int argc, char **argv) {
 	TableOfContents toc;
 	int result;
+	uint16_t ofsMajor, ofsMinor;
 
 	if (argc == 1) {
 		usage(argv[0]);
@@ -91,12 +95,13 @@ int main (int argc, char **argv) {
 		goto done;
 	}
 
+	ofsMajor = htonl(toc.VersionNumber)>>16&0xffff;
+	ofsMinor = htonl(toc.VersionNumber)&0xfff;
+
 	printf("volume name: %s\n", toc.VolumeName);
-	printf("ofs version: %u.%u\n", htonl(toc.VersionNumber)>>16&0xffff,
-												htonl(toc.VersionNumber)&0xfff);
-	if (((htonl(toc.VersionNumber)>>16&0xffff) != 1 ||
-			(htonl(toc.VersionNumber)&0xfff) != 0) && wuss) {
-		printf("Only ofs version 1.0 is supported. Sorry.\n");
+	printf("ofs version: %u.%u\n", ofsMajor, ofsMinor);
+	if ((ofsMajor != 1 && ofsMajor != 2 && ofsMajor != 3) && wuss) {
+		printf("Only ofs versions 1.0, 2.0 and 3.0 are supported. Sorry.\n");
 		goto done;
 	}
 
@@ -113,123 +118,158 @@ int main (int argc, char **argv) {
 		}
 	}
 
-	readDir(htonl(toc.FirstDirSector));
+	readDir(htonl(toc.FirstDirSector), ofsMajor);
 done:
 	close(fd);
 	return 0;
 }
 
-void readDir(int sector) {
-	uint32_t tmpoff;
+void skipBytes(uint32_t bytes) {
+	uint32_t offset;
+	
+	offset = lseek(fd, 0, SEEK_CUR);
+	offset += bytes;
+	if (lseek(fd, offset, SEEK_SET) != offset) {
+		perror(error);
+		exit(-1);
+	}
+}
+
+void readBytes(void *dst, uint32_t numBytes) {
+	if (read(fd, dst, numBytes) != numBytes) {
+		perror(error);
+		exit(-1);
+	}
+}
+
+void readDir(int sector, uint16_t ofsMajor) {
+	uint32_t tmpoff, offset;
 	int outfd,i,j;
-	DirectoryBlock block;
 	static struct timeval tv[2];
-	FileEntry e;
+
+	int fileNum;
+	FileAttributes attrs;
+	char fileName[65];
+	uint32_t nextDirectoryBlock;
+	uint8_t fileNameLength = (ofsMajor > 1 ? 64 : 32);
 
 	do {
-		tmpoff = sector*512;
-		debug_printf("looping! sector=%i,offset=%i\n",sector,tmpoff);
-		if (lseek(fd, tmpoff, SEEK_SET) != tmpoff) {
+		offset = sector*512;
+		debug_printf("looping! sector=%i,offset=%i\n",sector,offset);
+		if (lseek(fd, offset, SEEK_SET) != offset) {
 			sprintf(error, "%s line %d: lseek", __FILE__, __LINE__);
 			perror(error);
 			return;
 		}
-		if (read(fd, &block, sizeof(DirectoryBlock)) != sizeof(DirectoryBlock)) {
-			printf("read != sizeof(DirectoryBlock)\n");
-			return;
-		}
-		for (i=0; i<63; i++) {
-			e = block.Entries[i];
-			if (e.FileName[0] == '\0' && e.FileName[1] != '\0') { // && showHiddenFiles) {
-					if (htonl(e.LogicalSize) != 0) {
-						e.FileName[0] = '*';
+		
+		readBytes(&nextDirectoryBlock, sizeof(nextDirectoryBlock));
+		skipBytes(60);
+		
+		for (fileNum=0; fileNum<63; fileNum++) {
+			memset(&fileName, 0, countof(fileName));
+			readBytes(&fileName, fileNameLength);
+			readBytes(&attrs, sizeof(attrs));
+			if (ofsMajor > 1) {
+				skipBytes(32);
+			}
+
+			if (fileName[0] == '\0' && fileName[1] != '\0') { // && showHiddenFiles) {
+					if (htonl(attrs.LogicalSize) != 0) {
+						fileName[0] = '*';
 					}
 			}
-			if (e.FileName[0] != '\0') {
+			if (fileName[0] != '\0') {
 				for (j=0; j<recurse; j++) {
 					printf("\t");
 				}
-				printf("%s", e.FileName);
+				printf("%s", fileName);
 
-				if (htonl(e.FileType) == -1) {
+				if (htonl(attrs.FileType) == -1) {
 					printf("/");
-					debug_printf("\tDIR\t%i", htonl(e.FirstAllocList));
-					debug_printf("\t%i", htonl(e.LastAllocList));
+					debug_printf("\tDIR\t%i", htonl(attrs.FirstAllocList));
+					debug_printf("\t%i", htonl(attrs.LastAllocList));
 				} else {
-					if (!(htonl(e.FirstAllocList) & 0x80000000)) {
-						debug_printf("\tYES FAT\t%i", htonl(e.FirstAllocList));
+					if (!(htonl(attrs.FirstAllocList) & 0x80000000)) {
+						debug_printf("\tYES FAT\t%i", htonl(attrs.FirstAllocList));
 					} else {
-						debug_printf("\tNO FAT\t%i", htonl(e.FirstAllocList)&0x7fffffff);
+						debug_printf("\tNO FAT\t%i", htonl(attrs.FirstAllocList)&0x7fffffff);
 					}
-					debug_printf("\t%i", htonl(e.LastAllocList));
-					printf("\t%u", htonl(e.LogicalSize));
-					debug_printf("\t%i", htonl(e.PhysicalSize));
+					debug_printf("\t%i", htonl(attrs.LastAllocList));
+					printf("\t%u", htonl(attrs.LogicalSize));
+					debug_printf("\t%i", htonl(attrs.PhysicalSize));
 				}
 
-				debug_printf("\t%i", htonl(e.CreationDate));
-				debug_printf("\t%i", htonl(e.ModificationDate));
+				debug_printf("\t%i", htonl(attrs.CreationDate));
+				debug_printf("\t%i", htonl(attrs.ModificationDate));
 
-				if (showFileType && htonl(e.FileType) != -1) {
-					if (e.FileType != 0x00000000) {
-						tmpoff = htonl(e.FileType);
+				if (showFileType && htonl(attrs.FileType) != -1) {
+					if (attrs.FileType != 0x00000000) {
+						tmpoff = htonl(attrs.FileType);
 						printf("\t%c%c%c%c", (char)(tmpoff>>24&0xff), (char)(tmpoff>>16&0xff),
 											(char)(tmpoff>>8&0xff), (char)(tmpoff&0xff));
 					}
-					if (e.Creator != 0x00000000) {
-						tmpoff = htonl(e.Creator);
+					if (attrs.Creator != 0x00000000) {
+						tmpoff = htonl(attrs.Creator);
 						printf("\t%c%c%c%c", (char)(tmpoff>>24&0xff), (char)(tmpoff>>16&0xff),
 											(char)(tmpoff>>8&0xff), (char)(tmpoff&0xff));
 					}
 				}
 				printf("\n");
+
+				offset = lseek(fd, 0, SEEK_CUR);				
 				if (writeToDisk) {
-					if (htonl(e.FileType) == -1) {
+					if (htonl(attrs.FileType) == -1) {
 						recurse++;
-						j = mkdir(e.FileName, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
+						j = mkdir(fileName, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
 						if (j != -1) {
-							chdir(e.FileName);
-							readDir(htonl(e.FirstAllocList));
+							chdir(fileName);
+							readDir(htonl(attrs.FirstAllocList), ofsMajor);
 							chdir("..");
 						} else {
-							sprintf(error, "%s line %d: %s", __FILE__, __LINE__, e.FileName);
+							sprintf(error, "%s line %d: %s", __FILE__, __LINE__, fileName);
 							perror(error);
 						}
 						recurse--;
 					} else {	// it's a file, not a directory
 						tmpoff = lseek(fd, 0, SEEK_CUR);
-						outfd = open(e.FileName, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+						outfd = open(fileName, O_WRONLY|O_TRUNC|O_CREAT, 0644);
 						if (outfd == -1) {
-							sprintf(error, "%s line %d: %s", __FILE__, __LINE__, e.FileName);
+							sprintf(error, "%s line %d: %s", __FILE__, __LINE__, fileName);
 							perror(error);
 						} else {
-							if (!(htonl(e.FirstAllocList) & 0x80000000)) {
-								extractFATFile(outfd, e);
+							if (!(htonl(attrs.FirstAllocList) & 0x80000000)) {
+								extractFATFile(outfd, attrs);
 							} else {
-								extractNormalFile(outfd, e);
+								extractNormalFile(outfd, attrs);
 							}
 						}
 						close(outfd);
 						lseek(fd, tmpoff, SEEK_SET);
 					} // file|directory
-					tv[0].tv_sec = htonl(e.CreationDate);
+					tv[0].tv_sec = htonl(attrs.CreationDate);
 					tv[0].tv_usec = 0;
-					tv[1].tv_sec = htonl(e.ModificationDate);
+					tv[1].tv_sec = htonl(attrs.ModificationDate);
 					tv[1].tv_usec = 0;
-					j = utimes(e.FileName, tv);
+					j = utimes(fileName, tv);
 				} else { // writeToDisk
-					if (htonl(e.FileType) == -1) {
+					if (htonl(attrs.FileType) == -1) {
 						recurse++;
-						readDir(htonl(e.FirstAllocList));
+						readDir(htonl(attrs.FirstAllocList), ofsMajor);
 						recurse--;
 					}
 				}
+
+				lseek(fd, offset, SEEK_SET);
 			} // filename isn't \0
 		} // for loop (1...63)
-		sector = htonl(block.NextDirectoryBlock);
+		
+		skipBytes(64);
+		
+		sector = htonl(nextDirectoryBlock);
 	} while (sector != 0);
 } 
 
-void extractFATFile(int outfd, FileEntry e) {
+void extractFATFile(int outfd, FileAttributes e) {
 	struct fat fats[64];
 	char buffer[512];
 	int i=1,count,current,length;
@@ -264,7 +304,7 @@ void extractFATFile(int outfd, FileEntry e) {
 	debug_printf("i=%i\n",i-1);
 }
 
-void extractNormalFile(int outfd, FileEntry e) {
+void extractNormalFile(int outfd, FileAttributes e) {
 	uint32_t length,current;
 	char buffer[512];
 

@@ -45,8 +45,7 @@ typedef struct	TableOfContents {
 	uint32_t unknown3[109];
 } TableOfContents;
 
-typedef struct	FileEntry {
-	char     FileName[32];
+typedef struct	FileAttributes {
 	uint32_t FirstAllocList;
 	uint32_t LastAllocList;
 	uint32_t FileType;
@@ -55,14 +54,7 @@ typedef struct	FileEntry {
 	uint32_t LogicalSize;
 	uint32_t PhysicalSize;
 	uint32_t Creator;
-} FileEntry;
-
-typedef struct	DirectoryBlock {
-	uint32_t  NextDirectoryBlock;
-	uint32_t  unknown1[15];
-	FileEntry Entries[63];
-	uint32_t  unknown2[16];
-} DirectoryBlock;
+} FileAttributes;
 
 struct fat {
 	uint32_t offset;
@@ -70,7 +62,7 @@ struct fat {
 } fat;
 
 void usage(char *progname);
-void extractNormalFile(int output, FileEntry e);
-void extractFATFile(int output, FileEntry e);
-void readDir(int sector);
+void extractNormalFile(int output, FileAttributes e);
+void extractFATFile(int output, FileAttributes e);
+void readDir(int sector, uint16_t ofsMajor);
 void debug_printf(char *fmt, ...);
