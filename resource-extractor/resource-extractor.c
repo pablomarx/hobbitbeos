@@ -33,25 +33,27 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-#include <stdio.h>
 #include <fcntl.h>
-#include <unistd.h>
+#include <malloc/malloc.h>
+#include <png.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/errno.h>
 #include <sys/stat.h>
-#include <stdlib.h>
-#include <stdarg.h>
 #include <sys/time.h>
-#include <png.h>
-#include <malloc/malloc.h>
+#include <unistd.h>
 
 #include "palette.h"
 
 typedef struct ResourceHeader {
-	long type;
-	long unknown1;
-	long startsAt;
-	long size;
-	long unknown3;
+	uint32_t type;
+	uint32_t unknown1;
+	uint32_t startsAt;
+	uint32_t size;
+	uint32_t unknown3;
 } ResourceHeader;
 
 int extractImage(char *buffer, char *tofile, int width, int height);
@@ -64,7 +66,7 @@ int debug=0,allFiles=0,convert=0;
 int main (int argc, char **argv) {
 	int result,fd,i,total,outfd;
 	struct stat filestat;
-	long buf, start;
+	uint32_t buf, start;
 	ResourceHeader* hdr;
 	char* buffer;
 	char* filename;
@@ -123,7 +125,7 @@ int main (int argc, char **argv) {
 		goto done;
 	}
 
-	if (buf != 0x52535243) {
+	if (htonl(buf) != 'RSRC') {
 		printf("Did not find valid RSRC in %s.\n", argv[argc-1]);
 		goto done;
 	}
@@ -133,7 +135,8 @@ int main (int argc, char **argv) {
 		perror(error);
 		goto done;
 	}
-
+	start = htonl(start);
+	
 	debug_printf("RSRC header starts at 0x%08x\n", start);
 
 	if (lseek(fd, start, SEEK_SET) != start) {
@@ -149,8 +152,8 @@ int main (int argc, char **argv) {
 		goto done;
 	}
 
-	printf("%li RSRC records in this file\n", buf);
-	total = buf;
+	total = htonl(buf);
+	printf("%i RSRC records in this file\n", total);
 	hdr = malloc(sizeof(ResourceHeader)*total);
 
 	for (i=0; i<total; i++) {
@@ -159,6 +162,12 @@ int main (int argc, char **argv) {
 			perror(error);
 			goto done;
 		}
+		hdr[i].type = htonl(hdr[i].type);
+		hdr[i].unknown1 = htonl(hdr[i].unknown1);
+		hdr[i].startsAt = htonl(hdr[i].startsAt);
+		hdr[i].size = htonl(hdr[i].size);
+		hdr[i].unknown3 = htonl(hdr[i].unknown3);
+		
 		printf("Resource #%i: Type %c%c%c%c\n",i,(char)(hdr[i].type>>24&0xff),
 			(char)(hdr[i].type>>16&0xff),(char)(hdr[i].type>>8&0xff),
 			(char)(hdr[i].type&0xff));
@@ -192,7 +201,7 @@ int main (int argc, char **argv) {
 			goto done;
 		} else {
 			switch (hdr[i].type) {
-				case 0x49434f4e:
+				case 'ICON':
 					if (convert && hdr[i].size == 1024) {
 						filename = (char *)malloc( strlen(argv[argc-1]) + 11 );
 						sprintf(filename, "%s-ICON-%i.png", argv[argc-1], i);
@@ -204,7 +213,7 @@ int main (int argc, char **argv) {
 					} else if (convert) {
 						printf("ICON is not 1024 bytes. Can not convert to PNG\n");
 					}
-				case 0x4d49434e:
+				case 'MICN':
 					if (convert && hdr[i].size == 256) {
 						filename = (char *)malloc(strlen(argc[argv-1])+11);
 						sprintf(filename, "%s-MICN-%i.png", argv[argc-1], i);
