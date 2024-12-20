@@ -63,10 +63,19 @@ void debug_printf(char *fmt, ...);
 char error[255];
 int debug=0,allFiles=0,convert=0;
 
+uint32_t read32(int fd) {
+	uint32_t word;
+	if (read(fd, &word, sizeof(word)) != sizeof(word)) {
+		perror(error);
+		exit(-1);
+	}
+	return htonl(word);
+}
+
 int main (int argc, char **argv) {
-	int result,fd,i,total,outfd;
+	int result,fd,i,outfd;
 	struct stat filestat;
-	uint32_t buf, start;
+	uint32_t total,start;
 	ResourceHeader* hdr;
 	char* buffer;
 	char* filename;
@@ -112,31 +121,20 @@ int main (int argc, char **argv) {
 		goto done;
 	}
 
-	if (lseek(fd, filestat.st_size-8, SEEK_SET) != filestat.st_size-8) {
+	i = filestat.st_size-8;
+	if (lseek(fd, i, SEEK_SET) != i) {
 		sprintf(error, "%s line %d: seek %s to 0x%08x", __FILE__, __LINE__,
-			argv[argc-1], (int)filestat.st_size-8);
+			argv[argc-1], i);
 		perror(error);
 		goto done;
 	}
 
-	if (read(fd, &buf, sizeof(buf)) != sizeof(buf)) {
-		sprintf(error, "%s line %d: read %s", __FILE__, __LINE__, argv[argc-1]);
-		perror(error);
-		goto done;
-	}
-
-	if (htonl(buf) != 'RSRC') {
+	if (read32(fd) != 'RSRC') {
 		printf("Did not find valid RSRC in %s.\n", argv[argc-1]);
 		goto done;
 	}
 
-	if (read(fd, &start, sizeof(start)) != sizeof(start)) {
-		sprintf(error, "%s line %d: read %s", __FILE__, __LINE__, argv[argc-1]);
-		perror(error);
-		goto done;
-	}
-	start = htonl(start);
-	
+	start = read32(fd);
 	debug_printf("RSRC header starts at 0x%08x\n", start);
 
 	if (lseek(fd, start, SEEK_SET) != start) {
@@ -146,28 +144,17 @@ int main (int argc, char **argv) {
 		goto done;
 	}
 
-	if (read(fd, &buf, sizeof(buf)) != sizeof(buf)) {
-		sprintf(error, "%s line %d: read %s", __FILE__, __LINE__, argv[argc-1]);
-		perror(error);
-		goto done;
-	}
-
-	total = htonl(buf);
+	total = read32(fd);
 	printf("%i RSRC records in this file\n", total);
 	hdr = malloc(sizeof(ResourceHeader)*total);
 
 	for (i=0; i<total; i++) {
-		if (read(fd, &hdr[i], sizeof(ResourceHeader)) != sizeof(ResourceHeader)) {
-			sprintf(error, "%s line %d: read %s",__FILE__,__LINE__,argv[argc-1]);
-			perror(error);
-			goto done;
-		}
-		hdr[i].type = htonl(hdr[i].type);
-		hdr[i].unknown1 = htonl(hdr[i].unknown1);
-		hdr[i].startsAt = htonl(hdr[i].startsAt);
-		hdr[i].size = htonl(hdr[i].size);
-		hdr[i].unknown3 = htonl(hdr[i].unknown3);
-		
+		hdr[i].type = read32(fd);
+		hdr[i].unknown1 = read32(fd);
+		hdr[i].startsAt = read32(fd);
+		hdr[i].size = read32(fd);
+		hdr[i].unknown3 = read32(fd);
+
 		printf("Resource #%i: Type %c%c%c%c\n",i,(char)(hdr[i].type>>24&0xff),
 			(char)(hdr[i].type>>16&0xff),(char)(hdr[i].type>>8&0xff),
 			(char)(hdr[i].type&0xff));
